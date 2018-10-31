@@ -19,9 +19,9 @@ const char* password = "4Rmatp45";
 //  const char* password = "12345678";
 
 //Setting on what port the server to run, 81 for deployment(port 8080 for testing)
-ESP8266WebServer server(80);
+ESP8266WebServer server(81);
 // create a websocket server on port 82 (port 8081 for testing)
-WebSocketsServer webSocket(90);  
+WebSocketsServer webSocket(82);  
 
 // // Domain name for the mDNS responder
 const char* mdnsName = "NodeMCU-Light"; 
@@ -32,13 +32,12 @@ const char* passwordOTA = "1243";
 
 //Counters for logistics
 int32_t timesLightsSwitched = 0;
-unsigned long lastTimeLightTurnedON;
+unsigned long lastTimeLightTurnedON = 0;
 unsigned long totalLightsOnTime = 0;
 
 //States for current settings
 bool LightOn = true;
 bool cpyLightOn = LightOn;
-bool WakeOn = false;
 
 //This bool is used to control device lockout 
 bool lock = false; 
@@ -62,7 +61,7 @@ struct button_S
 };
 button_S buttonState;
 
-#define debounceTime 25
+#define debounceTime 15 //15 //25
 
 // EEPROM_Rotate EEPROMr;
 
@@ -106,10 +105,8 @@ void setup(void) {
 
 void loop(void) {
 
-//  debounceBtn();
   server.handleClient();
   ArduinoOTA.handle();
-//  debounceBtn();
   pinHandler();
   webSocket.loop();
   debounceBtn();
@@ -459,15 +456,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
             LightOn = false;
           }
         }
-        else if (payload[3] == 'W' && payload[4] == 'a' && payload[5] == 'k' && payload[6] == 'e') {
-
-          if (payload[7] == '1') {                      
-            WakeOn = true;
-          } else if (payload[7] == '0') {                  
-            WakeOn = false;
-          }
       }
-    } 
+       
+    break;
   }
 }
 
@@ -500,10 +491,11 @@ String getContentType(String filename){
 
 void sendStats() {
 
-if(LightOn) { 
-  totalLightsOnTime += millis() - lastTimeLightTurnedON;
-  lastTimeLightTurnedON = millis();//We need to reset the value so we don't overlap with the time that was add in the totalLightsOnTime
-}
+  if(LightOn) { 
+    totalLightsOnTime += millis() - lastTimeLightTurnedON;
+    lastTimeLightTurnedON = millis();//We need to reset the value so we don't overlap with the time that was added in the totalLightsOnTime
+  }
+
   String msgStatsChange = "Stats";
   String minutesSinceReboot = (String)(millis() / 60000);
   String LightsOnTime = (String)(totalLightsOnTime / 60000);
@@ -519,38 +511,32 @@ void pinHandler() {
   }
 
   if(LightOn != cpyLightOn) {
+    cpyLightOn = LightOn;
+    ++timesLightsSwitched;
+
     String msgLightChange = "Ligh";
-    String msgStatsChange = "Stats";
 
     //Send websocket message that the light state changed
     if(WebSocketnum != -1){
       if(LightOn) { 
-        msgLightChange+="1";
+        msgLightChange += "1";
       } else {
-        msgLightChange+="0";
+        msgLightChange += "0";
       }
       webSocket.sendTXT(WebSocketnum,msgLightChange);
-     
     }
-
-    if(LightOn) { 
-      lastTimeLightTurnedON = millis();
-    } 
-
-    cpyLightOn = LightOn;
-    ++timesLightsSwitched;
-
-    sendStats();
-
-    // if(timesLightsSwitched == 12) {
-    //    webSocket.sendTXT(WebSocketnum,"Disconect");
-    // }
-
+    
     if(LightOn){
       digitalWrite(relayPin,LOW);
+      //Save the current time when the lights are turned on
+      lastTimeLightTurnedON = millis();
     } else {
       digitalWrite(relayPin,HIGH);
+      //Write the total time the lights were on
+      totalLightsOnTime += millis() - lastTimeLightTurnedON;
     }
+
+    sendStats();
   }
 }
 
