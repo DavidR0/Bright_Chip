@@ -1,0 +1,14 @@
+body {
+    background: lightslategray ;
+}
+
+button {
+    border-radius: 10px;
+    min-width: 100px;
+    margin-top: 10px;    
+    background: #546E7A;
+    width: 20%;
+    height: 10%; 
+    font-size: 28px;
+    color: black; 
+};
