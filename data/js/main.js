@@ -11,8 +11,7 @@
         // #document has its nodes
         const on = document.getElementById('on');
         const off = document.getElementById('off');
-        const wakeUP = document.getElementById('wakeUp');
-        const remo = document.getElementById('remo');
+        const WebSocketReset = document.getElementById("websocketReset");
 
         connection.onopen = function () {
         connection.send('Connect ' + new Date());
@@ -37,18 +36,6 @@
             off.addEventListener("click", ()=>{
                 connection.send("SetLigh0");
                 console.log("Pressed off");
-            });
-        };
-
-        if(wakeUP){
-            wakeUP.addEventListener("click", ()=>{
-                wakeup = !wakeup;
-                if(wakeup) {
-                    connection.send("w1");
-                } else {
-                    connection.send("w0");
-                }
-                console.log(`Pressed wakeUp with value ${wakeup}`);
             });
         };
       }

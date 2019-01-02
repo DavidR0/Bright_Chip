@@ -1,12 +1,12 @@
 body {
-    background: lightslategray ;
+    background: #a6a6a6 ;
 }
 
 button {
     border-radius: 10px;
     min-width: 100px;
     margin-top: 10px;    
-    background: #546E7A;
+    background: whitesmoke;
     width: 20%;
     height: 10%; 
     font-size: 28px;

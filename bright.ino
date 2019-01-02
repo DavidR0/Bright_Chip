@@ -12,6 +12,7 @@
 #define relayPin   4  //D2
 #define buttonPin  5  //D1
 
+
 //Configure your network details here
 const char* ssid = "HUAWEI-Ex9S";
 const char* password = "4Rmatp45";
@@ -35,6 +36,8 @@ int32_t timesLightsSwitched = 0;
 unsigned long lastTimeLightTurnedON = 0;
 unsigned long totalLightsOnTime = 0;
 
+unsigned long btnResetTimer;
+
 //States for current settings
 bool LightOn = true;
 bool cpyLightOn = LightOn;
@@ -57,11 +60,11 @@ String sessioncookie;
 struct button_S
 {
   int phase = 0;
-  unsigned long  timeStamp;
+  unsigned long  timeStamp = millis();
 };
 button_S buttonState;
 
-#define debounceTime 15 //15 //25
+#define debounceTime 15
 
 // EEPROM_Rotate EEPROMr;
 
@@ -82,7 +85,7 @@ void setup(void) {
   const char * headerkeys[] = {"User-Agent","Cookie"} ;
   size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
   server.collectHeaders(headerkeys, headerkeyssize ); //These 3 lines tell esp to collect User-Agent and Cookie in http header when request is made
-  ArduinoOTA.setPassword(passwordOTA);
+  // ArduinoOTA.setPassword(passwordOTA);
 
   WiFi.setAutoConnect(true);
   
@@ -206,7 +209,6 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
   server.on("/login", handleLogin);
   server.on("/logoff",handleLogoff);
   server.on("/refresh",handleRefresh);
-  server.on("/reboot",handleRebootREQ);
   server.on("/removeWebSocket",handleResetWebSocket);
   server.onNotFound(handleNotFound);          // if someone requests any other file or page, go to function 'handleNotFound'
 
@@ -277,19 +279,12 @@ bool handleFileRead(String path) { // send the right file to the client (if it e
 void handleResetWebSocket() {
 
   webSocket.disconnect();
+  handleFileRead("/removeWebSocket.html");
 }
 
 void handleRebootREQ() {
-   if(is_authentified()){ //This is for reseting the inactivity timer, it covers everything explained above
-    tempign = millis();
-    String header = "HTTP/1.1 301 OK\r\nLocation: /\r\nCache-Control: no-cache\r\n\r\n";
-    server.sendContent(header); 
-    ESP.restart();
-  }
-  else{
-    String header = "HTTP/1.1 301 OK\r\nLocation: /login\r\nCache-Control: no-cache\r\n\r\n";
-    server.sendContent(header);
-  }
+
+  ESP.restart();
 }
 
 void handleLogin() {
@@ -354,12 +349,6 @@ if (!is_authentified()){ //This here checks if your cookie is valid in header an
     }
     server.send(404, "text/plain", message);
   }
-}
-
-void handleLogoff() {
-
-  String header = "HTTP/1.1 301 OK\r\nSet-Cookie: c=0\r\nLocation: /login\r\nCache-Control: no-cache\r\n\r\n"; //Set 'c=0', it users header, effectively deleting it's header
-  server.sendContent(header);
 }
 
 void handleRefresh() {
@@ -507,8 +496,19 @@ void sendStats() {
 void pinHandler() {
   //If button is pressed
   if(buttonState.phase == 2) {
-    LightOn = !LightOn;    
+    LightOn = !LightOn;
+    btnResetTimer = millis();    
   }
+
+  //Once btn is pressed check if it was held for at least 5 sec to reset the chip
+  // if(buttonState.phase == 3)
+  // {
+  //   if(millis() - btnResetTimer >= 5000) {
+  //     digitalWrite(relayPin,HIGH);
+  //     ESP.reset();
+  //   }
+    
+  // }
 
   if(LightOn != cpyLightOn) {
     cpyLightOn = LightOn;
