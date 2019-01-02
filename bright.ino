@@ -127,13 +127,6 @@ void loop(void) {
     //After one minute is passed without bad entries, reset trycount
   }
     
-    
-  if(abs(millis() - tempign) > 120000){
-    gencookie();
-    tempign = millis();
-    //if there is no activity from loged on user, change the generate a new cookie. This is more secure than adding expiry to the cookie header
-  }  
-
 }
 
 /*__________________________________________________________SETUP_FUNCTIONS__________________________________________________________*/
@@ -207,8 +200,6 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
  
   //Handling page requests
   server.on("/login", handleLogin);
-  server.on("/logoff",handleLogoff);
-  server.on("/refresh",handleRefresh);
   server.on("/removeWebSocket",handleResetWebSocket);
   server.onNotFound(handleNotFound);          // if someone requests any other file or page, go to function 'handleNotFound'
 
@@ -282,11 +273,6 @@ void handleResetWebSocket() {
   handleFileRead("/removeWebSocket.html");
 }
 
-void handleRebootREQ() {
-
-  ESP.restart();
-}
-
 void handleLogin() {
 
   String msg; //This is our buffer that we will add to the login html page when headers are wrong or device is locked
@@ -348,19 +334,6 @@ if (!is_authentified()){ //This here checks if your cookie is valid in header an
       message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
     }
     server.send(404, "text/plain", message);
-  }
-}
-
-void handleRefresh() {
-
-  if(is_authentified()){ //This is for reseting the inactivity timer, it covers everything explained above
-    tempign = millis();
-    String header = "HTTP/1.1 301 OK\r\nLocation: /\r\nCache-Control: no-cache\r\n\r\n";
-    server.sendContent(header); 
-  }
-  else{
-    String header = "HTTP/1.1 301 OK\r\nLocation: /login\r\nCache-Control: no-cache\r\n\r\n";
-    server.sendContent(header);
   }
 }
 
