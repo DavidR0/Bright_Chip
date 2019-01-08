@@ -3,6 +3,7 @@
 
 <head>
     <title>Light Control</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
     <meta charset="UTF-8" />
     <link href='/css/main.css' rel='stylesheet' type='text/css'>
     <meta content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0' name='viewport'>
@@ -10,17 +11,18 @@
     </head>
 
 <body>
-    <div class="parent">
-        <h1 id="title">Room Light Control</h1>
+    <div id="indexbackround">
+        <div class="parent">
+            <h1 id="title">Room Light Control</h1>
+        </div>
+
+        <a href="/settings.html" id="settings"><img src="/img/settings.png"></a>
+
+        <div class="input">
+            <button id="on">ON</button>
+            <button id="off">OFF</button>
+        </div>
     </div>
-
-    <a href="/settings.html" id="settings"><img src="/img/settings.png"></a>
-
-    <div class="input">
-        <button id="on">ON</button>
-        <button id="off">OFF</button>
-    </div>
-
 </body>
 
 </html>

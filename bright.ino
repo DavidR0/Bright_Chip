@@ -36,8 +36,6 @@ int32_t timesLightsSwitched = 0;
 unsigned long lastTimeLightTurnedON = 0;
 unsigned long totalLightsOnTime = 0;
 
-unsigned long btnResetTimer;
-
 //States for current settings
 bool LightOn = true;
 bool cpyLightOn = LightOn;
@@ -61,6 +59,7 @@ struct button_S
 {
   int phase = 0;
   unsigned long  timeStamp = millis();
+  unsigned long pressedTime;
 };
 button_S buttonState;
 
@@ -68,8 +67,16 @@ button_S buttonState;
 
 // EEPROM_Rotate EEPROMr;
 
-//Copy of WebSocket connection number
-uint8_t WebSocketnum = -1;
+
+struct WebSocketconnectionInfo
+{
+  bool connected = false; //See if WebSocket connection is online
+  unsigned long time;     //Time connection was made
+};
+
+WebSocketconnectionInfo webSocketconnection[5];
+
+int NbOnlineWebsockets = 0;
 
 /*__________________________________________________________SETUP__________________________________________________________*/
 
@@ -346,15 +353,29 @@ int connectedClients(){
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) { // When a WebSocket message is received
   switch (type) {
     case WStype_DISCONNECTED:             // if the websocket is disconnected
-      Serial.printf("[%u] Disconnected!\n", num);
-      WebSocketnum = -1;///Reset the number so that we can't sent messages with no connection
+        Serial.printf("[%u] Disconnected!\n", num);
+        webSocketconnection[num].connected = false;// Mark the connection as inactive/offline
+        NbOnlineWebsockets--;
       break;
 
     case WStype_CONNECTED: {              // if a new websocket connection is established
         IPAddress ip = webSocket.remoteIP(num);
         Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
-        WebSocketnum = num;///Set the number so that we can send messages
+          webSocketconnection[num].connected = true;//Mark the connection as active/online
+          webSocketconnection[num].time = millis();
+          NbOnlineWebsockets++;
+          //Make room for other clients, if too many clients are connected we remove the one with the longest connection time
+          if(NbOnlineWebsockets == 5) {
 
+            uint8_t longestConnection = 0;
+
+            for(int i = 1; i < 5; ++i){
+              if(webSocketconnection[i].time < webSocketconnection[longestConnection].time){
+                longestConnection = i;
+              }
+              webSocket.disconnect(longestConnection);
+            }
+          }
       }
       break;
 
@@ -373,7 +394,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
 
         if(payload[3] == 'S' && payload[4] == 't' && payload[5] == 'a' && payload[6] == 't' && payload[7] == 's') {
 
-          sendStats();
+          sendStats(num);
 
         } else if(payload[3] == 'S' && payload[4] == 't' && payload[5] == 'a' && payload[6] == 't' && payload[7] == 'e') {
 
@@ -388,7 +409,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         /*
               -- Stats
           Res -- Fact
-              -- Chipp 
         */
       } else if(payload[0] == 'R' && payload[1] == 'e' && payload[2] == 's') {
 
@@ -398,10 +418,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         } else if(payload[3] == 'F' && payload[4] == 'a' && payload[5] == 'c' && payload[6] == 't' && payload[7] == 'r') {
            webSocket.sendTXT(num,"Did a factory Reset");
 
-        } else if(payload[3] == 'C' && payload[4] == 'h' && payload[5] == 'i' && payload[6] == 'p' && payload[7] == 'p') {
-          webSocket.sendTXT(num,"RebootOK");
-          delay(200);
-          ESP.restart();
         }
         ///SET COMMANDS
         /*
@@ -451,7 +467,7 @@ String getContentType(String filename){
   return "text/plain";
 }
 
-void sendStats() {
+void sendStats(uint8_t num) {
 
   if(LightOn) { 
     totalLightsOnTime += millis() - lastTimeLightTurnedON;
@@ -463,25 +479,27 @@ void sendStats() {
   String LightsOnTime = (String)(totalLightsOnTime / 60000);
 
   //Send a websocket message with the new stats (because they changed)
-  webSocket.sendTXT(WebSocketnum, msgStatsChange + LightsOnTime + "/" + timesLightsSwitched + "/" + minutesSinceReboot);
+  webSocket.sendTXT(num, msgStatsChange + LightsOnTime + "/" + timesLightsSwitched + "/" + minutesSinceReboot);
+  webSocket.sendTXT(num,"Number of connected clients" + (String)NbOnlineWebsockets);
 }
 
 void pinHandler() {
   //If button is pressed
   if(buttonState.phase == 2) {
-    LightOn = !LightOn;
-    btnResetTimer = millis();    
+    LightOn = !LightOn;  
   }
 
   //Once btn is pressed check if it was held for at least 5 sec to reset the chip
-  // if(buttonState.phase == 3)
-  // {
-  //   if(millis() - btnResetTimer >= 5000) {
-  //     digitalWrite(relayPin,HIGH);
-  //     ESP.reset();
-  //   }
-    
-  // }
+  if(buttonState.pressedTime >= 5000)
+  {
+    digitalWrite(relayPin,HIGH);
+    delay(1000);
+    digitalWrite(relayPin,LOW);
+    delay(1000);
+    digitalWrite(relayPin,HIGH);
+    delay(1000);
+    ESP.reset();
+  }
 
   if(LightOn != cpyLightOn) {
     cpyLightOn = LightOn;
@@ -490,13 +508,19 @@ void pinHandler() {
     String msgLightChange = "Ligh";
 
     //Send websocket message that the light state changed
-    if(WebSocketnum != -1){
+    if(NbOnlineWebsockets > 0) {
       if(LightOn) { 
         msgLightChange += "1";
       } else {
         msgLightChange += "0";
       }
-      webSocket.sendTXT(WebSocketnum,msgLightChange);
+      //Send the change to all the connected clients
+      for(int i = 0; i < 5; ++i) {
+        if(webSocketconnection[i].connected)
+        {
+          webSocket.sendTXT(i,msgLightChange);
+        }
+      }
     }
     
     if(LightOn){
@@ -508,11 +532,16 @@ void pinHandler() {
       //Write the total time the lights were on
       totalLightsOnTime += millis() - lastTimeLightTurnedON;
     }
-
-    sendStats();
+    //Send the new stats to all the connected clients
+    for(int i = 0; i < 5; ++i) {
+      if(webSocketconnection[i].connected)
+      {
+        sendStats(i);
+      }
+    }
   }
 }
-
+//Negative Logic on the btn
 void debounceBtn() {
 
   switch (buttonState.phase) {
@@ -532,6 +561,7 @@ void debounceBtn() {
     }
     else if ((millis()- buttonState.timeStamp) >= debounceTime)
     {
+      buttonState.pressedTime = millis()- buttonState.timeStamp;
       buttonState.phase = 2;
     }
     break;
@@ -556,12 +586,8 @@ void debounceBtn() {
 
     else if (((millis() - buttonState.timeStamp) >= debounceTime) && !digitalRead(buttonPin))
     {
-      buttonState.phase = 5;
+      buttonState.phase = 0;
     }
-    break;
-
-  case 5:
-    buttonState.phase = 0;
     break;
   }
 }
