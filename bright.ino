@@ -5,6 +5,7 @@
 #include <ArduinoOTA.h>
 #include <FS.h>
 #include <WebSocketsServer.h>
+
 // #include <EEPROM_Rotate.h>
 
 /*__________________________________________________________Configurable Variables__________________________________________________________*/
@@ -133,6 +134,8 @@ void loop(void) {
     logincld = millis();
     //After one minute is passed without bad entries, reset trycount
   }
+
+  
     
 }
 
@@ -202,7 +205,6 @@ void startOTA() { // Start the OTA service
   ArduinoOTA.begin();
   Serial.println("OTA Ready");
 }
-
 void startServer() { // Start a HTTP server with a file read handler and an upload handler
  
   //Handling page requests
@@ -225,15 +227,6 @@ void startWebSocket() { // Start a WebSocket server
 void startSPIFFS() { // Start the SPIFFS and list all contents
   SPIFFS.begin();                             // Start the SPI Flash File System (SPIFFS)
   Serial.println("SPIFFS started. Contents:");
-  {
-    Dir dir = SPIFFS.openDir("/");
-    while (dir.next()) {                      // List the file system contents
-      String fileName = dir.fileName();
-      size_t fileSize = dir.fileSize();
-      Serial.printf("\tFS File: %s, size: %s\r\n", fileName.c_str(), formatBytes(fileSize).c_str());
-    }
-    Serial.printf("\n");
-  }
 }
 
 /*__________________________________________________________Security_FUNCTIONS__________________________________________________________*/
@@ -346,16 +339,12 @@ if (!is_authentified()){ //This here checks if your cookie is valid in header an
 
 /*__________________________________________________________WEBSOCKET_FUNCTIONALITY__________________________________________________________*/
 
-int connectedClients(){
-  return webSocket.connectedClients(false);
-}
-
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) { // When a WebSocket message is received
   switch (type) {
     case WStype_DISCONNECTED:             // if the websocket is disconnected
         Serial.printf("[%u] Disconnected!\n", num);
         webSocketconnection[num].connected = false;// Mark the connection as inactive/offline
-        NbOnlineWebsockets--;
+        NbOnlineWebsockets = webSocket.connectedClients(true);
       break;
 
     case WStype_CONNECTED: {              // if a new websocket connection is established
@@ -363,7 +352,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
           webSocketconnection[num].connected = true;//Mark the connection as active/online
           webSocketconnection[num].time = millis();
-          NbOnlineWebsockets++;
+          NbOnlineWebsockets = webSocket.connectedClients(true);
+          
           //Make room for other clients, if too many clients are connected we remove the one with the longest connection time
           if(NbOnlineWebsockets == 5) {
 
@@ -441,16 +431,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
 }
 
 /*__________________________________________________________HELPER_FUNCTIONS__________________________________________________________*/
-
-String formatBytes(size_t bytes) { // convert sizes in bytes to KB and MB
-  if (bytes < 1024) {
-    return String(bytes) + "B";
-  } else if (bytes < (1024 * 1024)) {
-    return String(bytes / 1024.0) + "KB";
-  } else if (bytes < (1024 * 1024 * 1024)) {
-    return String(bytes / 1024.0 / 1024.0) + "MB";
-  }
-}
 
 String getContentType(String filename){
   if(filename.endsWith(".html")) return "text/html";
