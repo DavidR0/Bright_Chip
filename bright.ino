@@ -2,38 +2,32 @@
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
+#include <DNSServer.h>
 #include <ArduinoOTA.h>
 #include <FS.h>
 #include <WebSocketsServer.h>
-
-// #include <EEPROM_Rotate.h>
+#include <EEPROM_Rotate.h>
 
 /*__________________________________________________________Configurable Variables__________________________________________________________*/
 
 #define relayPin   4  //D2
 #define buttonPin  5  //D1
 
-
-//Configure your network details here
-const char* ssid = "HUAWEI-Ex9S";
-const char* password = "4Rmatp45";
-//  const char* ssid = "OnePlus5";
-//  const char* password = "12345678";
-
 //Setting on what port the server to run, 81 for deployment(port 8080 for testing)
-ESP8266WebServer server(81);
+ESP8266WebServer server(80);
 // create a websocket server on port 82 (port 8081 for testing)
 WebSocketsServer webSocket(82);  
 
-// // Domain name for the mDNS responder
-const char* mdnsName = "NodeMCU-Light"; 
 //Password for OTA
 const char* passwordOTA = "1243";
+
+//MDNS name
+const char* mdnsName = "Bright_Lights";
 
 /*__________________________________________________________Nonconfigurable Variables__________________________________________________________*/
 
 //Counters for logistics
-int32_t timesLightsSwitched = 0;
+unsigned long timesLightsSwitched = 0;
 unsigned long lastTimeLightTurnedON = 0;
 unsigned long totalLightsOnTime = 0;
 
@@ -66,8 +60,9 @@ button_S buttonState;
 
 #define debounceTime 15
 
-// EEPROM_Rotate EEPROMr;
-
+//EEPROM STUFF
+EEPROM_Rotate EEPROMr;
+#define DATA_OFFSET     10
 
 struct WebSocketconnectionInfo
 {
@@ -79,6 +74,13 @@ WebSocketconnectionInfo webSocketconnection[5];
 
 int NbOnlineWebsockets = 0;
 
+const IPAddress apIP(192, 168, 1, 1);
+const char* apSSID = "Bright_Lights_SETUP";
+boolean settingMode;
+String ssidList;
+
+DNSServer dnsServer;
+
 /*__________________________________________________________SETUP__________________________________________________________*/
 
 void setup(void) {
@@ -88,40 +90,52 @@ void setup(void) {
   pinMode(relayPin, OUTPUT);
   pinMode(buttonPin, INPUT_PULLUP);
 
-  gencookie(); //generate new cookie on device start
-
-  const char * headerkeys[] = {"User-Agent","Cookie"} ;
-  size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
-  server.collectHeaders(headerkeys, headerkeyssize ); //These 3 lines tell esp to collect User-Agent and Cookie in http header when request is made
   // ArduinoOTA.setPassword(passwordOTA);
+  EEPROMr.size(3);
+  EEPROMr.begin(512);
+  delay(10);
 
-  WiFi.setAutoConnect(true);
-  
-  //Start the wifi and connect to configured network
-  startWiFi();
-  // Start the mDNS responder
-  startMDNS();
-  // Start the OTA service
-  startOTA();
-  //Start the SPIFFS and list all contents
-  startSPIFFS();
-  //Start a websocket server
-  startWebSocket();
-  //Start a http server
-  startServer();
-   
+  if (restoreConfig()) {
+    if (checkConnection()) {
+      settingMode = false;
+        //Start the mDNS responder
+        startMDNS();
+        //Start the OTA service
+        startOTA();
+        //Start the SPIFFS and list all contents
+        startSPIFFS();
+        //Start a websocket server
+        startWebSocket();
+        //Start a http server
+        startServer();
+        //generate new cookie on device start
+        gencookie(); 
+
+        WiFi.mode(WIFI_STA);//Turn off the soft access point
+
+        const char * headerkeys[] = {"User-Agent","Cookie"} ;
+        size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
+        server.collectHeaders(headerkeys, headerkeyssize ); //These 3 lines tell esp to collect User-Agent and Cookie in http header when request is made
+      return;
+    }
+  } 
+  settingMode = true;
+  setupMode();
 }
 
 /*__________________________________________________________LOOP__________________________________________________________*/
 
 void loop(void) {
-
-  server.handleClient();
-  ArduinoOTA.handle();
-  pinHandler();
-  webSocket.loop();
-  debounceBtn();
  
+ if (settingMode) {
+    dnsServer.processNextRequest();
+  } else {
+    webSocket.loop();
+    ArduinoOTA.handle();
+    pinHandler();
+    debounceBtn();
+  }
+  server.handleClient();
 
   if(lock && abs(millis() - logincld) > 300000){
     lock = false;
@@ -135,8 +149,6 @@ void loop(void) {
     //After one minute is passed without bad entries, reset trycount
   }
 
-  
-    
 }
 
 /*__________________________________________________________SETUP_FUNCTIONS__________________________________________________________*/
@@ -147,31 +159,13 @@ void startMDNS() {  // Start the mDNS responder
   }
 }
 
-void startWiFi() {  // Start a Wi-Fi access point, and try to connect
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.println("");
-
-  // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  } 
-    
-  Serial.println("");
-  Serial.print("Connected to ");
-  Serial.println(ssid);
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-}
-
 void startOTA() { // Start the OTA service
   
   //OTA handling
   ArduinoOTA.onStart([]() {
     //Commit data to a safe location in the memory so that the ota doesn't overwrite it
-    // EEPROMr.rotate(false);
-    // EEPROMr.commit();
+    EEPROMr.rotate(false);
+    EEPROMr.commit();
 
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH)
@@ -199,21 +193,73 @@ void startOTA() { // Start the OTA service
     else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
     else if (error == OTA_END_ERROR) Serial.println("End Failed");
     
-    // EEPROMr.rotate(true);
+    EEPROMr.rotate(true);
   });
 
   ArduinoOTA.begin();
   Serial.println("OTA Ready");
 }
 void startServer() { // Start a HTTP server with a file read handler and an upload handler
- 
+ if (settingMode) {
+    Serial.print("Starting Web Server at ");
+    Serial.println(WiFi.softAPIP());
+    server.on("/settings", []() {
+      String s = "<h1>Wi-Fi Settings</h1><p>Please enter your password by selecting the SSID.</p>";
+      s += "<form method=\"get\" action=\"setap\"><label>SSID: </label><select name=\"ssid\">";
+      s += ssidList;
+      s += "</select><br>Password: <input name=\"pass\" length=64 type=\"password\"><input type=\"submit\"></form>";
+      server.send(200, "text/html", makePage("Wi-Fi Settings", s));
+    });
+    server.on("/setap", []() {
+      for (int i = 0; i < 96; ++i) {
+        EEPROMr.write(i + DATA_OFFSET, 0);
+      }
+      String ssid = urlDecode(server.arg("ssid"));
+      Serial.print("SSID: ");
+      Serial.println(ssid);
+      String pass = urlDecode(server.arg("pass"));
+      Serial.print("Password: ");
+      Serial.println(pass);
+      Serial.println("Writing SSID to EEPROMr...");
+      for (int i = 0; i < ssid.length(); ++i) {
+        EEPROMr.write(i + DATA_OFFSET, ssid[i]);
+      }
+      Serial.println("Writing Password to EEPROMr...");
+      for (int i = 0; i < pass.length(); ++i) {
+        EEPROMr.write(32 + i + DATA_OFFSET, pass[i]);
+      }
+      EEPROMr.commit();
+      Serial.println("Write EEPROMr done!");
+      String s = "<h1>Setup complete.</h1><p>device will be connected to \"";
+      s += ssid;
+      s += "\" after the restart.";
+      server.send(200, "text/html", makePage("Wi-Fi Settings", s));
+      ESP.restart();
+    });
+    server.onNotFound([]() {
+      String s = "<h1>AP mode</h1><p><a href=\"/settings\">Wi-Fi Settings</a></p>";
+      server.send(200, "text/html", makePage("AP mode", s));
+    });
+  }
+  else {
   //Handling page requests
   server.on("/login", handleLogin);
   server.on("/removeWebSocket",handleResetWebSocket);
   server.onNotFound(handleNotFound);          // if someone requests any other file or page, go to function 'handleNotFound'
 
-  server.begin();                             // start the HTTP server
+                            
+  server.on("/reset", []() {
+      for (int i = 0; i < 96; ++i) {
+        EEPROMr.write(i + DATA_OFFSET, 0);
+      }
+      EEPROMr.commit();
+      String s = "<h1>Wi-Fi settings was reset.</h1><p>Reseting device.</p>";
+      server.send(200, "text/html", makePage("Reset Wi-Fi Settings", s));
+      ESP.restart();
+    });
+  }
   Serial.println("HTTP server started.");
+  server.begin();  // start the HTTP server
 }
 
 void startWebSocket() { // Start a WebSocket server
@@ -227,6 +273,31 @@ void startWebSocket() { // Start a WebSocket server
 void startSPIFFS() { // Start the SPIFFS and list all contents
   SPIFFS.begin();                             // Start the SPI Flash File System (SPIFFS)
   Serial.println("SPIFFS started. Contents:");
+}
+
+void setupMode() {
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+  int n = WiFi.scanNetworks();
+  delay(100);
+  Serial.println("");
+  for (int i = 0; i < n; ++i) {
+    ssidList += "<option value=\"";
+    ssidList += WiFi.SSID(i);
+    ssidList += "\">";
+    ssidList += WiFi.SSID(i);
+    ssidList += "</option>";
+  }
+  delay(100);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+  WiFi.softAP(apSSID);
+  dnsServer.start(53, "*", apIP);
+  startServer();
+  Serial.print("Starting Access Point at \"");
+  Serial.print(apSSID);
+  Serial.println("\"");
 }
 
 /*__________________________________________________________Security_FUNCTIONS__________________________________________________________*/
@@ -431,6 +502,93 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
 }
 
 /*__________________________________________________________HELPER_FUNCTIONS__________________________________________________________*/
+
+boolean restoreConfig() {
+  Serial.println("Reading EEPROMr...");
+  String ssid = "";
+  String pass = "";
+  if (EEPROMr.read(0 + DATA_OFFSET) != 0) {
+    for (int i = 0; i < 32; ++i) {
+      ssid += char(EEPROMr.read(i + DATA_OFFSET));
+    }
+    Serial.print("SSID: ");
+    Serial.println(ssid);
+    for (int i = 32; i < 96; ++i) {
+      pass += char(EEPROMr.read(i + DATA_OFFSET));
+    }
+    Serial.print("Password: ");
+    Serial.println(pass);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    return true;
+  }
+  else {
+    Serial.println("Config not found.");
+    return false;
+  }
+}
+
+boolean checkConnection() {
+  int count = 0;
+  Serial.print("Waiting for Wi-Fi connection");
+  while ( count < 30 ) {
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println();
+      Serial.println("Connected!");
+      return (true);
+    }
+    delay(500);
+    Serial.print(".");
+    count++;
+  }
+  Serial.println("Timed out.");
+  return false;
+}
+
+String makePage(String title, String contents) {
+  String s = "<!DOCTYPE html><html><head>";
+  s += "<meta name=\"viewport\" content=\"width=device-width,user-scalable=0\">";
+  s += "<title>";
+  s += title;
+  s += "</title></head><body>";
+  s += contents;
+  s += "</body></html>";
+  return s;
+}
+
+String urlDecode(String input) {
+  String s = input;
+  s.replace("%20", " ");
+  s.replace("+", " ");
+  s.replace("%21", "!");
+  s.replace("%22", "\"");
+  s.replace("%23", "#");
+  s.replace("%24", "$");
+  s.replace("%25", "%");
+  s.replace("%26", "&");
+  s.replace("%27", "\'");
+  s.replace("%28", "(");
+  s.replace("%29", ")");
+  s.replace("%30", "*");
+  s.replace("%31", "+");
+  s.replace("%2C", ",");
+  s.replace("%2E", ".");
+  s.replace("%2F", "/");
+  s.replace("%2C", ",");
+  s.replace("%3A", ":");
+  s.replace("%3A", ";");
+  s.replace("%3C", "<");
+  s.replace("%3D", "=");
+  s.replace("%3E", ">");
+  s.replace("%3F", "?");
+  s.replace("%40", "@");
+  s.replace("%5B", "[");
+  s.replace("%5C", "\\");
+  s.replace("%5D", "]");
+  s.replace("%5E", "^");
+  s.replace("%5F", "-");
+  s.replace("%60", "`");
+  return s;
+}
 
 String getContentType(String filename){
   if(filename.endsWith(".html")) return "text/html";
