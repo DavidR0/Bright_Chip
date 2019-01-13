@@ -628,16 +628,16 @@ void pinHandler() {
   }
 
   //Once btn is pressed check if it was held for at least 5 sec to reset the chip
-  if(buttonState.pressedTime >= 5000)
-  {
-    digitalWrite(relayPin,HIGH);
-    delay(1000);
-    digitalWrite(relayPin,LOW);
-    delay(1000);
-    digitalWrite(relayPin,HIGH);
-    delay(1000);
-    ESP.reset();
-  }
+  // if(buttonState.pressedTime >= 5000)
+  // {
+  //   digitalWrite(relayPin,HIGH);
+  //   delay(1000);
+  //   digitalWrite(relayPin,LOW);
+  //   delay(1000);
+  //   digitalWrite(relayPin,HIGH);
+  //   delay(1000);
+  //   ESP.reset();
+  // }
 
   if(LightOn != cpyLightOn) {
     cpyLightOn = LightOn;
