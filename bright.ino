@@ -35,6 +35,7 @@ unsigned long totalLightsOnTime = 0;
 bool LightOn = true;
 bool cpyLightOn = LightOn;
 
+//Security STUFF
 //This bool is used to control device lockout 
 bool lock = false; 
 
@@ -49,21 +50,19 @@ uint8_t i, trycount = 0;
 //this is cookie buffer
 String sessioncookie; 
 
-//Button debouncing
-struct button_S
-{
-  int phase = 0;
-  unsigned long  timeStamp = millis();
-  unsigned long pressedTime;
-};
-button_S buttonState;
 
-#define debounceTime 15
+//Variables for deboucing
+int buttonState;             // the current reading from the input pin
+int lastButtonState = LOW;   // the previous reading from the input pin
+
+unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long debounceDelay = 15;    // the debounce time; increase if the output flickers
 
 //EEPROM STUFF
 EEPROM_Rotate EEPROMr;
 #define DATA_OFFSET     10
 
+//WebSocket STUFF
 struct WebSocketconnectionInfo
 {
   bool connected = false; //See if WebSocket connection is online
@@ -74,6 +73,7 @@ WebSocketconnectionInfo webSocketconnection[5];
 
 int NbOnlineWebsockets = 0;
 
+//Wifi setup STUFF
 const IPAddress apIP(192, 168, 1, 1);
 const char* apSSID = "Bright_Lights_SETUP";
 boolean settingMode;
@@ -125,6 +125,8 @@ void setup(void) {
 
 /*__________________________________________________________LOOP__________________________________________________________*/
 
+unsigned long last = 0;
+
 void loop(void) {
  
  if (settingMode) {
@@ -136,6 +138,11 @@ void loop(void) {
     debounceBtn();
   }
   server.handleClient();
+
+  if(millis() - last >= 200) {
+    Serial.println(digitalRead(buttonPin));
+    last = millis();
+  }
 
   if(lock && abs(millis() - logincld) > 300000){
     lock = false;
@@ -623,9 +630,9 @@ void sendStats(uint8_t num) {
 
 void pinHandler() {
   //If button is pressed
-  if(buttonState.phase == 2) {
-    LightOn = !LightOn;  
-  }
+  // if(buttonState.phase == 2) {
+  //   LightOn = !LightOn;  
+  // }
 
   //Once btn is pressed check if it was held for at least 5 sec to reset the chip
   // if(buttonState.pressedTime >= 5000)
@@ -679,53 +686,38 @@ void pinHandler() {
     }
   }
 }
-//Negative Logic on the btn
+
+
+//Negative Logic on the btn (0 is pressed)
 void debounceBtn() {
+  // read the state of the switch into a local variable:
+  int reading = digitalRead(buttonPin);
 
-  switch (buttonState.phase) {
+  // check to see if you just pressed the button
+  // (i.e. the input went from LOW to HIGH), and you've waited long enough
+  // since the last press to ignore any noise:
 
-  case 0:
-    if (digitalRead(buttonPin))
-    {
-      buttonState.phase = 1;
-    }
-    break;
-
-  case 1:
-    if (!digitalRead(buttonPin))
-    {
-      buttonState.timeStamp = millis();
-      buttonState.phase = 0;
-    }
-    else if ((millis()- buttonState.timeStamp) >= debounceTime)
-    {
-      buttonState.pressedTime = millis()- buttonState.timeStamp;
-      buttonState.phase = 2;
-    }
-    break;
-
-  case 2:
-    buttonState.phase = 3;
-    break;
-
-  case 3:
-    if (!digitalRead(buttonPin))
-    {
-      buttonState.phase = 4;
-    }
-    break;
-
-  case 4:
-    if (digitalRead(buttonPin))
-    {
-      buttonState.phase = 3;
-      buttonState.timeStamp = millis();
-    }
-
-    else if (((millis() - buttonState.timeStamp) >= debounceTime) && !digitalRead(buttonPin))
-    {
-      buttonState.phase = 0;
-    }
-    break;
+  // If the switch changed, due to noise or pressing:
+  if (reading != lastButtonState) {
+    // reset the debouncing timer
+    lastDebounceTime = millis();
   }
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (reading != buttonState) {
+      buttonState = reading;
+
+      // only toggle the LIGHT if the new button state is HIGH
+      if (buttonState == HIGH) {
+        LightOn = !LightOn;
+      }
+    }
+  }
+
+  // save the reading. Next time through the loop, it'll be the lastButtonState:
+  lastButtonState = reading;
 }
